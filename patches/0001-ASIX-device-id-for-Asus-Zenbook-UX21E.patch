@@ -1,0 +1,28 @@
+From 6ac39ec79117eddaee71ddcafbff7374f55e1df4 Mon Sep 17 00:00:00 2001
+From: Oskari Saarenmaa <os@ohmu.fi>
+Date: Sun, 18 Dec 2011 18:35:18 +0200
+Subject: [PATCH 1/2] ASIX: device id for Asus Zenbook UX21E.
+
+Signed-off-by: Oskari Saarenmaa <os@ohmu.fi>
+---
+ drivers/net/usb/asix.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/usb/asix.c b/drivers/net/usb/asix.c
+index e6fed4d..6bf83d0 100644
+--- a/drivers/net/usb/asix.c
++++ b/drivers/net/usb/asix.c
+@@ -1655,6 +1655,10 @@ static const struct usb_device_id	products [] = {
+ 	// ASIX 88772a
+ 	USB_DEVICE(0x0db0, 0xa877),
+ 	.driver_info = (unsigned long) &ax88772_info,
++}, {
++	// ASUS USB Ethernet Adapter delivered with ZenBook UX21E
++	USB_DEVICE(0x0b95, 0x7e2b),
++	.driver_info = (unsigned long) &ax88772_info,
+ },
+ 	{ },		// END
+ };
+-- 
+1.7.7.4
+
