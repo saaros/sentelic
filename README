@@ -1,0 +1,22 @@
+The Sentelic touchpad in an ASUS ZenBook UX21E is reported as
+
+"psmouse serio4: sentelic: Finger Sensing Pad, hw: 14.3.1, sw: 1.0.0-K, buttons: 4"
+
+and does not offer any kind of scrolling support with unpatched Linux kernel
+version 3.2-rc6.
+
+This patch adds absolute positioning support for it which enables edge
+scrolling as well as multitouch support which enables two-finger scrolling.
+
+To use the patched driver copy the files from src/ to drivers/input/mouse/
+or apply the patch in patches/.  The patch applies cleanly to 3.2-rc6.
+There's also an unrelated patch under patches/ to add support for the USB
+Ethernet adapter delivered with the ZenBook.
+
+TODO:
+
+* Middle-click support
+* Cursor movement is a bit jumpy
+* Horizontal two-finger scrolling does not work (at least in Gnome 3) for
+  some reason and also messes up vertical scrolling
+* Figure out more values for the registers
