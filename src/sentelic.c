@@ -660,9 +660,11 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 	struct fsp_data *ad = psmouse->private;
 	unsigned char *packet = psmouse->packet;
 	unsigned short abs_x, abs_y, fingers = 0;
-	static unsigned short lastfingers = 10, r_absx=0, r_absy=0;
+	static unsigned short r_absx=0, r_absy=0;
 	unsigned short vscroll = 0, hscroll = 0, lscroll = 0, rscroll = 0;
 	int rel_x, rel_y;
+	static bool l_is_lifted = false;
+	bool is_lifted;
 
 	if (psmouse->pktcnt < 4)
 		return PSMOUSE_GOOD_DATA;
@@ -702,21 +704,23 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 		abs_x = (packet[1] << 2) | ((packet[3] >> 2) & 0x03);
 		abs_y = (packet[2] << 2) | (packet[3] & 0x03);
 
-		fingers = (packet[3] > 0) ? 1 : 0;
-		if (fingers && (packet[0] & 0x38) == 0x38) {
-			/* two fingers down */
+        fingers = 1;
+		if ((packet[0] & 0x78) == 0x78)
 			fingers = 2;
-		}
+
+        is_lifted = (packet[3] > 0) ? false : true;
+        if (is_lifted)
+            fingers--;
 		
 		/* filter out spurious lift packets
-		 * real lifts are always reported by two 'zero finger' packets
+		 * real lifts are always reported by two 'finger lifted' packets
 		 */
-		if ((fingers == 0) && (lastfingers != 0)) {
-		    lastfingers = 0;
+		if (is_lifted && !l_is_lifted) {
+		    l_is_lifted = true;
 		    return PSMOUSE_FULL_PACKET;
 		}
 		    
-		lastfingers = fingers;
+		l_is_lifted = is_lifted;
 
 		/* right finger - store for later */
 		if ((packet[0] & 0x7c) == 0x7c) {
