@@ -662,6 +662,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 	unsigned short abs_x, abs_y, fingers = 0;
 	static unsigned short r_absx=0, r_absy=0;
 	unsigned short vscroll = 0, hscroll = 0, lscroll = 0, rscroll = 0;
+	unsigned short left_button = 0;
 	int rel_x, rel_y;
 	static bool l_is_lifted = false;
 	bool is_lifted;
@@ -745,9 +746,15 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
         sentelic_set_slot(dev, 0, fingers > 0, abs_x, abs_y);
         sentelic_set_slot(dev, 1, fingers == 2, r_absx, r_absy);
 		
+		left_button = packet[0] & 0x01;
+		/* filter on-pad clicks if necessary */
+		left_button &= ((packet[0] & BIT(4)) ||
+						((ad->flags & FSPDRV_FLAG_EN_OPC) ==
+						 FSPDRV_FLAG_EN_OPC));
+
 		input_report_key(dev, BTN_TOOL_FINGER, fingers == 1);
 		input_report_key(dev, BTN_TOOL_DOUBLETAP, fingers == 2);
-		input_report_key(dev, BTN_LEFT, packet[0] & 0x01);
+		input_report_key(dev, BTN_LEFT, left_button);
 		input_report_key(dev, BTN_RIGHT, packet[0] & 0x02);
 		break;		
 
