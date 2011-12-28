@@ -642,14 +642,30 @@ static void fsp_packet_debug(struct psmouse *psmouse, unsigned char packet[])
 }
 #endif
 
+static void sentelic_set_slot(struct input_dev *dev, int slot, bool active,
+			      unsigned int x, unsigned int y)
+{
+	input_mt_slot(dev, slot);
+	input_mt_report_slot_state(dev, MT_TOOL_FINGER, active);
+	if (active) {
+		input_report_abs(dev, ABS_MT_POSITION_X, x);
+		input_report_abs(dev, ABS_MT_POSITION_Y, y);
+	}
+}
+
+
 static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 {
 	struct input_dev *dev = psmouse->dev;
 	struct fsp_data *ad = psmouse->private;
 	unsigned char *packet = psmouse->packet;
 	unsigned short abs_x, abs_y, fingers = 0;
+	static unsigned short r_absx=0, r_absy=0;
 	unsigned short vscroll = 0, hscroll = 0, lscroll = 0, rscroll = 0;
+	unsigned short left_button = 0;
 	int rel_x, rel_y;
+	static bool l_is_lifted = false;
+	bool is_lifted;
 
 	if (psmouse->pktcnt < 4)
 		return PSMOUSE_GOOD_DATA;
@@ -689,28 +705,58 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 		abs_x = (packet[1] << 2) | ((packet[3] >> 2) & 0x03);
 		abs_y = (packet[2] << 2) | (packet[3] & 0x03);
 
-		fingers = (packet[3] > 0) ? 1 : 0;
-		if (fingers && (packet[0] & 0x38) == 0x38) {
-			/* two fingers down */
+        fingers = 1;
+		if ((packet[0] & 0x78) == 0x78)
 			fingers = 2;
+
+        is_lifted = (packet[3] > 0) ? false : true;
+        if (is_lifted)
+            fingers--;
+		
+		/* filter out spurious lift packets
+		 * real lifts are always reported by two 'finger lifted' packets
+		 */
+		if (is_lifted && !l_is_lifted) {
+		    l_is_lifted = true;
+		    return PSMOUSE_FULL_PACKET;
+		}
+		    
+		l_is_lifted = is_lifted;
+
+		/* right finger - store for later */
+		if ((packet[0] & 0x7c) == 0x7c) {
+		    r_absx = abs_x;
+		    r_absy = abs_y;
+		    return PSMOUSE_FULL_PACKET;
 		}
 
-		input_report_key(dev, BTN_LEFT, packet[0] & 0x01);
-		input_report_key(dev, BTN_RIGHT, packet[0] & 0x02);
-		input_report_key(dev, BTN_TOUCH, fingers);
+		/* left finger with no matching right finger */
+		if ((packet[0] & 0x78) == 0x78 && (r_absx == 0))
+		    return PSMOUSE_FULL_PACKET;
+
+		input_report_key(dev, BTN_TOUCH, fingers != 0);
 		input_report_abs(dev, ABS_X, abs_x);
 		input_report_abs(dev, ABS_Y, abs_y);
-		input_mt_slot(dev, 0);
-		input_mt_report_slot_state(dev, MT_TOOL_FINGER, fingers >= 1);
-		input_mt_slot(dev, 1);
-		input_mt_report_slot_state(dev, MT_TOOL_FINGER, fingers >= 2);
-		if (fingers >= 2) {
-			input_report_abs(dev, ABS_MT_POSITION_X, abs_x);
-			input_report_abs(dev, ABS_MT_POSITION_Y, abs_y);
+		
+		if (fingers == 0) {
+		    r_absx = 0;
+		    r_absy = 0;
 		}
+    	
+        sentelic_set_slot(dev, 0, fingers > 0, abs_x, abs_y);
+        sentelic_set_slot(dev, 1, fingers == 2, r_absx, r_absy);
+		
+		left_button = packet[0] & 0x01;
+		/* filter on-pad clicks if necessary */
+		left_button &= ((packet[0] & BIT(4)) ||
+						((ad->flags & FSPDRV_FLAG_EN_OPC) ==
+						 FSPDRV_FLAG_EN_OPC));
+
 		input_report_key(dev, BTN_TOOL_FINGER, fingers == 1);
 		input_report_key(dev, BTN_TOOL_DOUBLETAP, fingers == 2);
-		break;
+		input_report_key(dev, BTN_LEFT, left_button);
+		input_report_key(dev, BTN_RIGHT, packet[0] & 0x02);
+		break;		
 
 	case FSP_PKT_TYPE_NORMAL_OPC:
 		/* on-pad click, filter it if necessary */
