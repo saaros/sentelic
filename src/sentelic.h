@@ -41,7 +41,7 @@
 #define	FSP_REG_OPTZ_YLO	0x36
 #define	FSP_REG_OPTZ_YHI	0x37
 #define	FSP_REG_SYSCTL5		0x40
-#define	FSP_REG_ENABLE_V14	0x90
+#define	FSP_REG_SWREG1		0x90
 #define	FSP_BIT_90_DEGREE	BIT(0)
 #define	FSP_BIT_EN_MSID6	BIT(1)
 #define	FSP_BIT_EN_MSID7	BIT(2)
@@ -64,6 +64,13 @@
 #define	FSP_PKT_TYPE_NOTIFY	(0x02)
 #define	FSP_PKT_TYPE_NORMAL_OPC	(0x03)
 #define	FSP_PKT_TYPE_SHIFT	(6)
+
+/* swreg1 values, supported in Cx hardware */
+#define FSP_CX_ABSOLUTE_MODE	BIT(0)
+#define FSP_CX_GESTURE_OUTPUT	BIT(1)
+#define FSP_CX_2FINGERS_OUTPUT	BIT(2)
+#define FSP_CX_FINGER_UP_OUTPUT	BIT(3)
+#define FSP_CX_CONTINUOUS_MODE	BIT(4)
 
 #ifdef __KERNEL__
 
