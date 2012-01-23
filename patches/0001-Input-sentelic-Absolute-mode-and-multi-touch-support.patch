@@ -1,17 +1,25 @@
-From 5a92fa1e35b6aee236eda72942439a25b69d4dd5 Mon Sep 17 00:00:00 2001
+From c85dd348ae14ef3e4c9b76ff1c06d4276c38fe73 Mon Sep 17 00:00:00 2001
 From: Oskari Saarenmaa <os@ohmu.fi>
-Date: Wed, 21 Dec 2011 01:42:21 +0200
-Subject: [PATCH] sentelic: asus zenbook touchpad absolute positioning &
- multi-touch support.
+Date: Mon, 23 Jan 2012 23:04:34 +0200
+Subject: [PATCH] Input: sentelic: Absolute mode and multi-touch support for
+ Cx+ hardware.
+
+- Support for absolute position mode and multi-touch on Cx+ revision
+  hardware latest documentation provided by Sentelic.
+- Supports two-finger horizontal and vertical scrolling and enabling
+  and disabling click-on-tap.
+- Fixed fsp_packet_debug() arguments and added some more debug info.
+
+The patch was developed and tested on an ASUS Zenbook UX21E.
 
 Signed-off-by: Oskari Saarenmaa <os@ohmu.fi>
 ---
- drivers/input/mouse/sentelic.c |  132 ++++++++++++++++++++++++++++++++++-----
- drivers/input/mouse/sentelic.h |    1 +
- 2 files changed, 116 insertions(+), 17 deletions(-)
+ drivers/input/mouse/sentelic.c |  185 ++++++++++++++++++++++++++++++++++++----
+ drivers/input/mouse/sentelic.h |    8 ++
+ 2 files changed, 176 insertions(+), 17 deletions(-)
 
 diff --git a/drivers/input/mouse/sentelic.c b/drivers/input/mouse/sentelic.c
-index c5b12d2..9eb6ecb 100644
+index e36847d..e6d9475 100644
 --- a/drivers/input/mouse/sentelic.c
 +++ b/drivers/input/mouse/sentelic.c
 @@ -21,6 +21,7 @@
@@ -31,7 +39,7 @@ index c5b12d2..9eb6ecb 100644
  
  /*
   * Make sure that the value being sent to FSP will not conflict with
-@@ -599,26 +600,44 @@ static struct attribute_group fsp_attribute_group = {
+@@ -620,26 +621,44 @@ static struct attribute_group fsp_attribute_group = {
  };
  
  #ifdef FSP_DEBUG
@@ -83,22 +91,25 @@ index c5b12d2..9eb6ecb 100644
  {
  }
  #endif
-@@ -628,7 +647,8 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
+@@ -649,8 +668,11 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
  	struct input_dev *dev = psmouse->dev;
  	struct fsp_data *ad = psmouse->private;
  	unsigned char *packet = psmouse->packet;
 -	unsigned char button_status = 0, lscroll = 0, rscroll = 0;
 +	unsigned short abs_x, abs_y, fingers = 0;
 +	unsigned short vscroll = 0, hscroll = 0, lscroll = 0, rscroll = 0;
++	unsigned short lbutton, rbutton, mbutton;
  	int rel_x, rel_y;
++	static bool r_down, lifted;
  
  	if (psmouse->pktcnt < 4)
-@@ -639,9 +659,57 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
+ 		return PSMOUSE_GOOD_DATA;
+@@ -660,9 +682,103 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
  	 */
  
  	switch (psmouse->packet[0] >> FSP_PKT_TYPE_SHIFT) {
 +	case FSP_PKT_TYPE_NOTIFY:
-+		/* Notify packets are sent with v14 touchpads if
++		/* Notify packets are sent with Cx touchpads if
 +		 * register 0x90 bit 0x02 is set:
 +		 * vscroll up: 0x86, down: 0x82
 +		 * hscroll left: 0x84, right: 0x80
@@ -120,40 +131,86 @@ index c5b12d2..9eb6ecb 100644
 +		input_report_rel(dev, REL_WHEEL, vscroll);
 +		input_report_rel(dev, REL_HWHEEL, hscroll);
 +		break;
++
  	case FSP_PKT_TYPE_ABS:
 -		dev_warn(&psmouse->ps2dev.serio->dev,
 -			 "Unexpected absolute mode packet, ignored.\n");
-+		/* Absolute packets are sent with v14 touchpads if
-+		 * register 0x90 bit 0x01 is set
++		/* Absolute packets are sent with version Cx and newer
++		 * touchpads if register 0x90 bit 0x01 is set
 +		 */
 +		abs_x = (packet[1] << 2) | ((packet[3] >> 2) & 0x03);
 +		abs_y = (packet[2] << 2) | (packet[3] & 0x03);
 +
-+		fingers = (packet[3] > 0) ? 1 : 0;
-+		if (fingers && (packet[0] & 0x38) == 0x38) {
-+			/* two fingers down */
-+			fingers = 2;
++		lbutton = packet[0] & BIT(0);
++		rbutton = packet[0] & BIT(1);
++		mbutton = packet[0] & BIT(2);
++
++		if (packet[1] || packet[2] || packet[3]) {
++			/* at least one finger is down */
++			fingers++;
++			lifted = false;
++		} else {
++			if (lifted == false) {
++				lifted = true;
++				return PSMOUSE_FULL_PACKET;
++			}
 +		}
 +
-+		input_report_key(dev, BTN_LEFT, packet[0] & 0x01);
-+		input_report_key(dev, BTN_RIGHT, packet[0] & 0x02);
-+		input_report_key(dev, BTN_TOUCH, fingers);
++		if (packet[0] & BIT(5)) {
++			/* multitouch mode: two fingers down */
++			fingers++;
++			if ((packet[0] & BIT(4)) == 0 && lbutton && rbutton) {
++				/* middle-click in multitouch mode */
++				lbutton = 0;
++				rbutton = 0;
++				mbutton = 1;
++			}
++			if (packet[0] & BIT(2)) {
++				/* right finger down, save state */
++				r_down = true;
++				return PSMOUSE_FULL_PACKET;
++			}
++			if (r_down == false) {
++				/* left finger down, right finger not */
++				return PSMOUSE_FULL_PACKET;
++			}
++		} else if (fingers == 0) {
++			r_down = false;
++		}
++
++		if ((packet[0] & BIT(4)) == 0 && lbutton) {
++			/* on pad click */
++			lbutton = (ad->flags & FSPDRV_FLAG_EN_OPC) ==
++						FSPDRV_FLAG_EN_OPC;
++		}
++
++		input_report_key(dev, BTN_TOUCH, fingers > 0);
 +		input_report_abs(dev, ABS_X, abs_x);
 +		input_report_abs(dev, ABS_Y, abs_y);
++
 +		input_mt_slot(dev, 0);
 +		input_mt_report_slot_state(dev, MT_TOOL_FINGER, fingers >= 1);
++		if (fingers >= 1) {
++			input_report_abs(dev, ABS_MT_POSITION_X, abs_x);
++			input_report_abs(dev, ABS_MT_POSITION_Y, abs_y);
++		}
++
 +		input_mt_slot(dev, 1);
 +		input_mt_report_slot_state(dev, MT_TOOL_FINGER, fingers >= 2);
 +		if (fingers >= 2) {
 +			input_report_abs(dev, ABS_MT_POSITION_X, abs_x);
 +			input_report_abs(dev, ABS_MT_POSITION_Y, abs_y);
 +		}
++
 +		input_report_key(dev, BTN_TOOL_FINGER, fingers == 1);
 +		input_report_key(dev, BTN_TOOL_DOUBLETAP, fingers == 2);
++		input_report_key(dev, BTN_LEFT, lbutton);
++		input_report_key(dev, BTN_MIDDLE, mbutton);
++		input_report_key(dev, BTN_RIGHT, rbutton);
  		break;
  
  	case FSP_PKT_TYPE_NORMAL_OPC:
-@@ -654,6 +722,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
+@@ -675,6 +791,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
  		/* normal packet */
  		/* special packet data translation from on-pad packets */
  		if (packet[3] != 0) {
@@ -161,7 +218,7 @@ index c5b12d2..9eb6ecb 100644
  			if (packet[3] & BIT(0))
  				button_status |= 0x01;	/* wheel down */
  			if (packet[3] & BIT(1))
-@@ -694,7 +763,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
+@@ -715,7 +832,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
  
  	input_sync(dev);
  
@@ -170,7 +227,7 @@ index c5b12d2..9eb6ecb 100644
  
  	return PSMOUSE_FULL_PACKET;
  }
-@@ -733,6 +802,7 @@ static int fsp_activate_protocol(struct psmouse *psmouse)
+@@ -754,6 +871,7 @@ static int fsp_activate_protocol(struct psmouse *psmouse)
  	val &= ~(FSP_BIT_EN_MSID7 | FSP_BIT_EN_MSID8 | FSP_BIT_EN_AUTO_MSID8);
  	/* Ensure we are not in absolute mode */
  	val &= ~FSP_BIT_EN_PKT_G0;
@@ -178,22 +235,27 @@ index c5b12d2..9eb6ecb 100644
  	if (pad->buttons == 0x06) {
  		/* Left/Middle/Right & Scroll Up/Down/Right/Left */
  		val |= FSP_BIT_EN_MSID6;
-@@ -756,6 +826,14 @@ static int fsp_activate_protocol(struct psmouse *psmouse)
+@@ -777,6 +895,19 @@ static int fsp_activate_protocol(struct psmouse *psmouse)
  	fsp_onpad_vscr(psmouse, true);
  	fsp_onpad_hscr(psmouse, true);
  
-+	/* Enable absolute positioning and multitouch on V14 pads */
-+	if (pad->ver >> 4 == 14) {
-+		if (fsp_reg_write(psmouse, FSP_REG_ENABLE_V14, 0x05)) {
++	/* Enable absolute positioning, two finger mode and continuous output
++	 * on Cx and newer pads (version ID 0xE0+)
++	 */
++	if (pad->ver >= 0xE0) {
++		val = FSP_CX_ABSOLUTE_MODE |
++			FSP_CX_2FINGERS_OUTPUT |
++			FSP_CX_CONTINUOUS_MODE;
++		if (fsp_reg_write(psmouse, FSP_REG_SWREG1, val)) {
 +			dev_warn(&psmouse->ps2dev.serio->dev,
-+				 "Failed to enable absolute positioning and multitouch.\n");
++				 "Failed to enable multitouch settings.\n");
 +		}
 +	}
 +
  	return 0;
  }
  
-@@ -811,6 +889,7 @@ static int fsp_reconnect(struct psmouse *psmouse)
+@@ -832,6 +963,7 @@ static int fsp_reconnect(struct psmouse *psmouse)
  
  int fsp_init(struct psmouse *psmouse)
  {
@@ -201,7 +263,7 @@ index c5b12d2..9eb6ecb 100644
  	struct fsp_data *priv;
  	int ver, rev, buttons;
  	int error;
-@@ -837,11 +916,30 @@ int fsp_init(struct psmouse *psmouse)
+@@ -858,11 +990,30 @@ int fsp_init(struct psmouse *psmouse)
  	priv->flags |= FSPDRV_FLAG_EN_OPC;
  
  	/* Set up various supported input event bits */
@@ -216,10 +278,10 @@ index c5b12d2..9eb6ecb 100644
 +	__set_bit(REL_WHEEL, dev->relbit);
 +	__set_bit(REL_HWHEEL, dev->relbit);
 +
-+	if (ver >> 4 == 14) {
-+		/* ASUS ZenBook UX21E has Sentelic touchpad version 14,
-+		 * set up multi touch and absolute positioning.
-+		 */
++	/* Set up multitouch mode on Cx+ version hardware (reg value 0xE0+)
++	 * for example ASUS Zenbook UX21E has Sentelic touchpad version 0xE3
++	 */
++	if (ver >= 0xE0) {
 +		int abs_x = 1024, abs_y = 768;
 +
 +		__set_bit(EV_ABS, dev->evbit);
@@ -238,17 +300,31 @@ index c5b12d2..9eb6ecb 100644
  	psmouse->protocol_handler = fsp_process_byte;
  	psmouse->disconnect = fsp_disconnect;
 diff --git a/drivers/input/mouse/sentelic.h b/drivers/input/mouse/sentelic.h
-index ed1395a..44fa120 100644
+index 2e4af24..c72ca5e 100644
 --- a/drivers/input/mouse/sentelic.h
 +++ b/drivers/input/mouse/sentelic.h
-@@ -40,6 +40,7 @@
+@@ -41,6 +41,7 @@
  #define	FSP_REG_OPTZ_YLO	0x36
  #define	FSP_REG_OPTZ_YHI	0x37
  #define	FSP_REG_SYSCTL5		0x40
-+#define	FSP_REG_ENABLE_V14	0x90
++#define	FSP_REG_SWREG1		0x90
  #define	FSP_BIT_90_DEGREE	BIT(0)
  #define	FSP_BIT_EN_MSID6	BIT(1)
  #define	FSP_BIT_EN_MSID7	BIT(2)
+@@ -64,6 +65,13 @@
+ #define	FSP_PKT_TYPE_NORMAL_OPC	(0x03)
+ #define	FSP_PKT_TYPE_SHIFT	(6)
+ 
++/* swreg1 values, supported in Cx hardware */
++#define FSP_CX_ABSOLUTE_MODE	BIT(0)
++#define FSP_CX_GESTURE_OUTPUT	BIT(1)
++#define FSP_CX_2FINGERS_OUTPUT	BIT(2)
++#define FSP_CX_FINGER_UP_OUTPUT	BIT(3)
++#define FSP_CX_CONTINUOUS_MODE	BIT(4)
++
+ #ifdef __KERNEL__
+ 
+ struct fsp_data {
 -- 
-1.7.7.4
+1.7.7.5
 
