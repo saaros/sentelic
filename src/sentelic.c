@@ -649,15 +649,14 @@ static void fsp_packet_debug(struct psmouse *psmouse, unsigned char packet[])
 
 	ps2_packet_cnt++;
 	jiffies_msec = jiffies_to_msecs(jiffies);
-	psmouse_info(psmouse,
+	psmouse_dbg(psmouse,
 		    "%08dms %s packet: %02x, %02x, %02x, %02x;"
 		    "abs_x: %d, abs_y: %d\n",
 		    jiffies_msec, packet_type,
 		    packet[0], packet[1], packet[2], packet[3],
 		    abs_x, abs_y);
 	if (jiffies_msec - ps2_last_second > 1000) {
-		psmouse_info(psmouse, "PS/2 packets/sec = %d\n",
-			     ps2_packet_cnt);
+		psmouse_dbg(psmouse, "PS/2 packets/sec = %d\n", ps2_packet_cnt);
 		ps2_packet_cnt = 0;
 		ps2_last_second = jiffies_msec;
 	}
@@ -674,7 +673,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 	struct fsp_data *ad = psmouse->private;
 	unsigned char *packet = psmouse->packet;
 	unsigned short abs_x, abs_y, fingers = 0;
-	unsigned short vscroll = 0, hscroll = 0, lscroll = 0, rscroll = 0;
+	unsigned short lscroll = 0, rscroll = 0;
 	unsigned short l_btn, r_btn, m_btn;
 	int rel_x, rel_y;
 	static bool lifted;
@@ -690,32 +689,13 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 
 	switch (psmouse->packet[0] >> FSP_PKT_TYPE_SHIFT) {
 	case FSP_PKT_TYPE_NOTIFY:
-		/* Notify packets are sent with Cx touchpads if
-		 * register 0x90 bit 0x02 is set:
-		 * vscroll up: 0x86, down: 0x82
-		 * hscroll left: 0x84, right: 0x80
-		 */
-		switch (packet[2]) {
-		case 0x86:
-			vscroll =  1;
-			break;
-		case 0x82:
-			vscroll = -1;
-			break;
-		case 0x84:
-			hscroll =  1;
-			break;
-		case 0x80:
-			hscroll = -1;
-			break;
-		}
-		input_report_rel(dev, REL_WHEEL, vscroll);
-		input_report_rel(dev, REL_HWHEEL, hscroll);
+		dev_warn(&psmouse->ps2dev.serio->dev,
+			"Unexpected gesture packet, ignored.\n");
 		break;
 
 	case FSP_PKT_TYPE_ABS:
 		/* Absolute packets are sent with version Cx and newer
-		 * touchpads if register 0x90 bit 0x01 is set
+		 * touchpads if register 0x90 bit 0 is set.
 		 */
 		abs_x = (packet[1] << 2) | ((packet[3] >> 2) & 0x03);
 		abs_y = (packet[2] << 2) | (packet[3] & 0x03);
@@ -738,7 +718,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 		if ((packet[0] & (BIT(4)|BIT(5))) == 0 && l_btn) {
 			/* on pad click, let other components handle this.
 			 * NOTE: do not filter out on-pad clicks when
-			 * we're in multitouch mode BIT(5), they are real
+			 * we're in multitouch mode, BIT(5), they are real
 			 * clickpad-clicks, not just single finger taps.
 			 */
 			l_btn = 0;
@@ -754,7 +734,10 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 				m_btn = 1;
 			}
 			if (packet[0] & BIT(2)) {
-				/* right finger down, ignore the event */
+				/* 2nd finger down, ignore the event, we'll
+				 * get the same event for the 1st finger as
+				 * we're in multitouch mode.
+				 */
 				return PSMOUSE_FULL_PACKET;
 			}
 		}
@@ -1012,6 +995,9 @@ int fsp_init(struct psmouse *psmouse)
 		__set_bit(BTN_TOUCH, dev->keybit);
 		__set_bit(BTN_TOOL_FINGER, dev->keybit);
 		__set_bit(BTN_TOOL_DOUBLETAP, dev->keybit);
+		__set_bit(INPUT_PROP_POINTER, dev->propbit);
+		__set_bit(INPUT_PROP_DIRECT, dev->propbit);
+		__set_bit(INPUT_PROP_BUTTONPAD, dev->propbit);
 
 		input_set_abs_params(dev, ABS_X, 0, abs_x, 0, 0);
 		input_set_abs_params(dev, ABS_Y, 0, abs_y, 0, 0);

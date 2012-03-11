@@ -1,0 +1,90 @@
+From fed81b76cd4e7f5b41df4a5a8ec7b007f9508768 Mon Sep 17 00:00:00 2001
+From: Oskari Saarenmaa <os@ohmu.fi>
+Date: Wed, 25 Jan 2012 00:38:06 +0200
+Subject: [PATCH 1/2] Input: sentelic: fixed fsp_packet_debug() arguments and
+ added more debug info.
+
+Signed-off-by: Oskari Saarenmaa <os@ohmu.fi>
+---
+ drivers/input/mouse/sentelic.c |   36 +++++++++++++++++++++++++++++-------
+ 1 files changed, 29 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/input/mouse/sentelic.c b/drivers/input/mouse/sentelic.c
+index e36847d..87c910d 100644
+--- a/drivers/input/mouse/sentelic.c
++++ b/drivers/input/mouse/sentelic.c
+@@ -620,18 +620,40 @@ static struct attribute_group fsp_attribute_group = {
+ };
+ 
+ #ifdef FSP_DEBUG
+-static void fsp_packet_debug(unsigned char packet[])
++static void fsp_packet_debug(struct psmouse *psmouse, unsigned char packet[])
+ {
+ 	static unsigned int ps2_packet_cnt;
+ 	static unsigned int ps2_last_second;
+ 	unsigned int jiffies_msec;
++	const char *packet_type = "UNKNOWN";
++	int abs_x = 0, abs_y = 0;
++
++	/* Interpret & dump the packet data. */
++	switch (psmouse->packet[0] >> FSP_PKT_TYPE_SHIFT) {
++	case FSP_PKT_TYPE_ABS:
++		packet_type = "Absolute";
++		abs_x = (packet[1] << 2) | ((packet[3] >> 2) & 0x03);
++		abs_y = (packet[2] << 2) | (packet[3] & 0x03);
++		break;
++	case FSP_PKT_TYPE_NORMAL:
++		packet_type = "Normal";
++		break;
++	case FSP_PKT_TYPE_NOTIFY:
++		packet_type = "Notify";
++		break;
++	case FSP_PKT_TYPE_NORMAL_OPC:
++		packet_type = "Normal-OPC";
++		break;
++	}
+ 
+ 	ps2_packet_cnt++;
+ 	jiffies_msec = jiffies_to_msecs(jiffies);
+ 	psmouse_dbg(psmouse,
+-		    "%08dms PS/2 packets: %02x, %02x, %02x, %02x\n",
+-		    jiffies_msec, packet[0], packet[1], packet[2], packet[3]);
+-
++		    "%08dms %s packet: %02x, %02x, %02x, %02x;"
++		    "abs_x: %d, abs_y: %d\n",
++		    jiffies_msec, packet_type,
++		    packet[0], packet[1], packet[2], packet[3],
++		    abs_x, abs_y);
+ 	if (jiffies_msec - ps2_last_second > 1000) {
+ 		psmouse_dbg(psmouse, "PS/2 packets/sec = %d\n", ps2_packet_cnt);
+ 		ps2_packet_cnt = 0;
+@@ -639,7 +661,7 @@ static void fsp_packet_debug(unsigned char packet[])
+ 	}
+ }
+ #else
+-static void fsp_packet_debug(unsigned char packet[])
++static void fsp_packet_debug(struct psmouse *psmouse, unsigned char packet[])
+ {
+ }
+ #endif
+@@ -659,6 +681,8 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
+ 	 * Full packet accumulated, process it
+ 	 */
+ 
++	fsp_packet_debug(psmouse, packet);
++
+ 	switch (psmouse->packet[0] >> FSP_PKT_TYPE_SHIFT) {
+ 	case FSP_PKT_TYPE_ABS:
+ 		dev_warn(&psmouse->ps2dev.serio->dev,
+@@ -715,8 +739,6 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
+ 
+ 	input_sync(dev);
+ 
+-	fsp_packet_debug(packet);
+-
+ 	return PSMOUSE_FULL_PACKET;
+ }
+ 
+-- 
+1.7.7.6
+
